@@ -56,6 +56,7 @@ namespace Coffee.GitDependencyResolver
                 @"(git@|git://|http://|https://|ssh://)",
                 k_RegOption);
 
+
         private static readonly GitLock s_GitLock = new GitLock();
 
         public string name { get; private set; }
@@ -77,24 +78,33 @@ namespace Coffee.GitDependencyResolver
             hash = "";
             url = "";
             version = new SemVersion(0);
-            dependencies = new PackageMeta [0];
-            gitDependencies = new PackageMeta [0];
+            dependencies = new PackageMeta[0];
+            gitDependencies = new PackageMeta[0];
         }
 
         public static PackageMeta FromPackageJson(string filePath)
         {
+            if (!File.Exists(filePath))
+            {
+                Debug.LogError("Package.json does not exist at " + filePath);
+                return null;
+            }
+            string dir = Path.GetDirectoryName(filePath);
+            Dictionary<string, object> dict;
+            PackageMeta package = new PackageMeta() { repository = dir, };
+
             try
             {
-                if (!File.Exists(filePath))
-                {
-                    return null;
-                }
+                dict = Json.Deserialize(File.ReadAllText(filePath)) as Dictionary<string, object>;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError("Package.json error on deserialize at " + filePath + "\n" + ex.Message);
+                return null;
+            }
 
-                string dir = Path.GetDirectoryName(filePath);
-                Dictionary<string, object> dict = Json.Deserialize(File.ReadAllText(filePath)) as Dictionary<string, object>;
-                PackageMeta package = new PackageMeta() {repository = dir,};
-
-
+            try
+            {
                 object obj;
 
                 if (dict.TryGetValue("name", out obj))
@@ -102,27 +112,36 @@ namespace Coffee.GitDependencyResolver
                     package.name = obj as string;
                 }
 
-                if (dict.TryGetValue("version", out obj))
+                if (string.IsNullOrEmpty(package.name) || string.IsNullOrWhiteSpace(package.name))
+                {
+                    Debug.LogError("Package.json name is null at " + filePath);
+                    return null;
+                }
+
+                if (dict.ContainsKey("version") && dict.TryGetValue("version", out obj))
                 {
                     package.version = obj as string;
                 }
 
-                if (dict.TryGetValue("dependencies", out obj))
+                if (dict.ContainsKey("dependencies") && dict.TryGetValue("dependencies", out obj) && obj is Dictionary<string, object>)
                 {
                     package.dependencies = (obj as Dictionary<string, object>)
-                        .Select(x => FromNameAndUrl(x.Key, (string) x.Value))
-                        .ToArray();
+                                            .Select(x => FromNameAndUrl(x.Key, (string)x.Value))
+                                            .ToArray();
+
                 }
                 else
                 {
                     package.dependencies = new PackageMeta[0];
                 }
 
-                if (dict.TryGetValue("gitDependencies", out obj))
+                if (dict.ContainsKey("gitDependencies") && dict.TryGetValue("gitDependencies", out obj) && (obj is Dictionary<string, object>))
                 {
                     package.gitDependencies = (obj as Dictionary<string, object>)
-                        .Select(x => FromNameAndUrl(x.Key, (string) x.Value))
+                        .Select(x => FromNameAndUrl(x.Key, (string)x.Value))
                         .ToArray();
+                    Debug.Log("FOUND GIT DEPENDENCY : " + package.name + " -> " + package.gitDependencies.Length
+                    + "\n [0]" + package.gitDependencies[0].name);
                 }
                 else
                 {
@@ -131,8 +150,9 @@ namespace Coffee.GitDependencyResolver
 
                 return package;
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.LogError("Package.json error on loading at " + filePath + "\n" + ex.Message);
                 return null;
             }
         }
@@ -140,16 +160,18 @@ namespace Coffee.GitDependencyResolver
         public static PackageMeta FromPackageDir(string dir)
         {
             var package = FromPackageJson(dir + "/package.json");
-            if (package == null) return null;
-
+            if (package == null)
+            {
+                Debug.LogError("Package loaded is null");
+                return null;
+            }
             package.SetVersion(package.revision);
             return package;
         }
 
         public static PackageMeta FromNameAndUrl(string name, string url)
         {
-            PackageMeta package = new PackageMeta() {name = name};
-
+            PackageMeta package = new PackageMeta() { name = name };
             // Non git package.
             var isGit = s_IsGitReg.IsMatch(url);
             if (!isGit)
@@ -164,6 +186,7 @@ namespace Coffee.GitDependencyResolver
 
             package.repository = m.Groups["repository"].Value;
             package.revision = m.Groups["revision"].Value;
+
             package.url = url;
             package.hash = s_GitLock.dependencies.FirstOrDefault(x => x.IsValid(package)).hash ?? "";
 
@@ -212,8 +235,10 @@ namespace Coffee.GitDependencyResolver
 
         public IEnumerable<PackageMeta> GetAllDependencies()
         {
-            return gitDependencies.Concat(dependencies);
+            // return gitDependencies.Concat(dependencies);
+            return gitDependencies;
         }
+
 
         public string GetDirectoryName()
         {

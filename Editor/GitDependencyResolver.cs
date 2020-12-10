@@ -16,7 +16,7 @@ namespace Coffee.GitDependencyResolver
         const StringComparison Ordinal = StringComparison.Ordinal;
         const string k_LogHeader = "<b><color=#2E8B57>[GitResolver]</color></b> ";
 
-        [System.Diagnostics.Conditional("GDR_LOG")]
+        //[System.Diagnostics.Conditional("GDR_LOG")]
         static void Log(string format, params object[] args)
         {
             UnityEngine.Debug.LogFormat(k_LogHeader + format, args);
@@ -40,7 +40,7 @@ namespace Coffee.GitDependencyResolver
             return Directory.GetDirectories("./Library/PackageCache")
                 .Concat(Directory.GetDirectories("./Packages"))
                 .Select(PackageMeta.FromPackageDir) // Convert to PackageMeta
-                .Concat(new[] {PackageMeta.FromPackageJson("./Packages/manifest.json")})
+                .Concat(new[] { PackageMeta.FromPackageJson("./Packages/manifest.json") })
                 .Where(x => x != null) // Skip null
                 .ToArray();
         }
@@ -101,6 +101,16 @@ namespace Coffee.GitDependencyResolver
             }
         }
 
+        static void LogPackage(PackageMeta pack, string prefix = "")
+        {
+            Log(prefix + " - " + pack.name + " has " + pack.GetAllDependencies().Count() + " dependecies"
+                    + "\npath:" + pack.path
+                    + "\nrepo:" + pack.repository
+                    + "\nurl:" + pack.url
+                    + "\nver:" + pack.version
+                    + "\nrevision:" + pack.revision);
+        }
+
         private static void StartResolve()
         {
             var needToRefresh = false;
@@ -116,12 +126,22 @@ namespace Coffee.GitDependencyResolver
 
                 // Collect all installed packages.
                 PackageMeta[] installedPackages = GetInstalledPackages();
+                foreach (var item in installedPackages)
+                {
+                    //LogPackage(item);
+                }
 
                 // Collect all dependencies.
-                var dependencies = installedPackages
-                    .SelectMany(x => x.GetAllDependencies()) // Get all dependencies
-                    .Where(x => !string.IsNullOrEmpty(x.repository)) // path (url) is available
-                    .ToArray();
+                List<PackageMeta> dependencies = new List<PackageMeta>();
+                foreach (var item in installedPackages)
+                {
+                    if (item.GetAllDependencies().Count() > 0)
+                        dependencies.AddRange(item.GetAllDependencies());
+                }
+                //var dependencies = installedPackages
+                //    .SelectMany(x => x.GetAllDependencies()) // Get all dependencies
+                //    .Where(x => !string.IsNullOrEmpty(x.repository)) // path (url) is available
+                //    .ToArray();
 
                 // Check all dependencies.
                 var requestedPackages = new List<PackageMeta>();
@@ -132,6 +152,8 @@ namespace Coffee.GitDependencyResolver
                         .Concat(requestedPackages)
                         .Any(x => dependency.name == x.name && (dependency.version != null && dependency.version <= x.version || x.version == null));
 
+
+                    LogPackage(dependency, isInstalled ? "[INSTALLED]" : "[UNINSTALLED]");
                     if (isInstalled) continue;
 
                     // Install the depended package later.
@@ -161,8 +183,8 @@ namespace Coffee.GitDependencyResolver
                     PackageMeta package = requestedPackages[i];
                     var clonePath = Path.GetTempFileName() + "_";
 
-                    EditorUtility.DisplayProgressBar("Clone Package", string.Format("Cloning {0}@{1}", package.name, package.version), i / (float) requestedPackages.Count);
-                    Log("Cloning '{0}@{1}' ({2}, {3})", package.name, package.version, package.revision, package.path);
+                    EditorUtility.DisplayProgressBar("Clone Package", string.Format("Cloning {0}@{1}", package.name, package.version), i / (float)requestedPackages.Count);
+                    Log("Cloning '{0}@{1}' ({2}, {3})\n{4}", package.name, package.version, package.revision, package.path, package.url);
                     var success = GitUtils.ClonePackage(package, clonePath);
 
                     // Check cloned
@@ -175,8 +197,16 @@ namespace Coffee.GitDependencyResolver
 
                     // Check package path (query)
                     var pkgPath = package.GetPackagePath(clonePath);
+                    Log("NEW Package path : " + pkgPath);
                     PackageMeta newPackage = PackageMeta.FromPackageDir(pkgPath);
-                    if (!Directory.Exists(pkgPath) || newPackage == null || newPackage.name != package.name)
+
+                    if (newPackage == null)
+                    {
+                        Error("Failed to install a package '{0}@{1}': new package is null.", package.name, package.version);
+                        needToCheck = false;
+                        continue;
+                    }
+                    else if (!Directory.Exists(pkgPath) || newPackage.name != package.name)
                     {
                         Error("Failed to install a package '{0}@{1}': Different package name. {2} != {3}", package.name, package.version, newPackage.name, package.name);
                         needToCheck = false;
@@ -184,9 +214,10 @@ namespace Coffee.GitDependencyResolver
                     }
 
                     // Install as an embed package
-                    var installPath = "Packages/." + newPackage.GetDirectoryName();
+                    var installPath = "Packages/" + newPackage.GetDirectoryName();
                     DirUtils.Delete(installPath);
                     DirUtils.Create(installPath);
+                    Debug.Log("1");
                     DirUtils.Move(pkgPath, installPath, p => p != ".git");
 
                     Log("A package '{0}@{1}' has been installed.", package.name, package.version);
@@ -197,7 +228,7 @@ namespace Coffee.GitDependencyResolver
 
                 EditorUtility.ClearProgressBar();
             }
-
+            EditorUtility.ClearProgressBar();
             AssetDatabase.StopAssetEditing();
             PackageMeta.SaveGitLock();
 

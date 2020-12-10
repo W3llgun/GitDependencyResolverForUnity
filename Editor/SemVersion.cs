@@ -316,7 +316,7 @@ namespace Coffee.GitDependencyResolver
         /// </returns>
         public int CompareTo(object obj)
         {
-            return CompareTo((SemVersion) obj);
+            return CompareTo((SemVersion)obj);
         }
 
         /// <summary>
@@ -443,7 +443,7 @@ namespace Coffee.GitDependencyResolver
             if (ReferenceEquals(this, obj))
                 return true;
 
-            var other = (SemVersion) obj;
+            var other = (SemVersion)obj;
 
             return this.Major == other.Major &&
                    this.Minor == other.Minor &&
